@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { DetailsPageLayout } from "../DetailsPageLayout";
 import { Navigation } from "../Navigation";
 import { AdvisoryListPage } from "../advisory-list/AdvisoryListPage";
+import { expect } from "../../assertions";
 
 export class AdvisoryDetailsPage {
   _layout: DetailsPageLayout;
@@ -18,9 +19,8 @@ export class AdvisoryDetailsPage {
     const toolbar = await listPage.getToolbar();
     const table = await listPage.getTable();
 
-    await toolbar.applyTextFilter("Filter text", advisoryID);
-    await table.waitUntilDataIsLoaded();
-    await table.verifyColumnContainsText("ID", advisoryID);
+    await toolbar.applyFilter({ "Filter text": advisoryID });
+    await expect(table).toHaveColumnWithValue("ID", advisoryID);
 
     await page.getByRole("link", { name: advisoryID, exact: true }).click();
 

@@ -21,10 +21,10 @@ export class PackageDetailsPage {
     const toolbar = await listPage.getToolbar();
     const table = await listPage.getTable();
 
-    await toolbar.applyTextFilter("Filter text", packageDetail.Name);
-    await table.waitUntilDataIsLoaded();
+    await toolbar.applyFilter({ "Filter text": packageDetail.Name });
+
     // Get rows matching the package name
-    const matchingRows = table.getRowsByCellValue(packageDetail);
+    const matchingRows = await table.getRowsByCellValue(packageDetail);
     await matchingRows
       .getByRole("link", { name: packageDetail.Name, exact: true })
       .click();
