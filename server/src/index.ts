@@ -1,5 +1,3 @@
-/* eslint-env node */
-
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,7 +15,7 @@ import {
 import { proxyMap } from "./proxies";
 
 const debugMode = process.env.DEBUG === "1";
-debugMode && console.log("CONSOLE_ENV", TRUSTIFICATION_ENV);
+if (debugMode) console.log("CONSOLE_ENV", TRUSTIFICATION_ENV);
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const pathToClientDist = path.join(__dirname, "../../client/dist");

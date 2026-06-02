@@ -35,7 +35,7 @@ import {
   sbomDeletedSuccessMessage,
 } from "@app/Constants";
 import { PathParam, Paths, useRouteParams } from "@app/Routes";
-import type { SbomSummary } from "@app/client";
+import type { SbomHead } from "@app/client";
 import { ConfirmDialog } from "@app/components/ConfirmDialog";
 import { LoadingWrapper } from "@app/components/LoadingWrapper";
 import { NotificationsContext } from "@app/components/NotificationsContext";
@@ -70,7 +70,7 @@ export const SbomDetails: React.FC = () => {
   // Delete action
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false);
 
-  const onDeleteSbomSuccess = (sbom: SbomSummary) => {
+  const onDeleteSbomSuccess = (sbom: SbomHead) => {
     setIsDeleteDialogOpen(false);
     pushNotification({
       title: sbomDeletedSuccessMessage(sbom),
@@ -100,13 +100,13 @@ export const SbomDetails: React.FC = () => {
     tabKeys: ["info", "packages", "vulnerabilities", "models"],
   });
 
-  const infoTabRef = React.createRef<HTMLElement>();
-  const packagesTabRef = React.createRef<HTMLElement>();
-  const vulnerabilitiesTabRef = React.createRef<HTMLElement>();
-  const modelsTabRef = React.createRef<HTMLElement>();
+  const infoTabRef = React.useRef<HTMLElement>();
+  const packagesTabRef = React.useRef<HTMLElement>();
+  const vulnerabilitiesTabRef = React.useRef<HTMLElement>();
+  const modelsTabRef = React.useRef<HTMLElement>();
 
   // Tabs popover refs
-  const vulnerabilitiesTabPopoverRef = React.createRef<HTMLElement>();
+  const vulnerabilitiesTabPopoverRef = React.useRef<HTMLElement>();
 
   return (
     <>

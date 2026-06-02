@@ -46,7 +46,7 @@ export type DrilldownOption = {
   /** Whether or not it has children */
   hasChildren: boolean;
   /** Arbitrary data attached to this option */
-  // biome-ignore lint/suspicious/noExplicitAny: allowed
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- allowed
   value?: any;
   itemProps?: Omit<MenuItemProps, "itemId">;
 };
@@ -159,7 +159,7 @@ export const DrilldownSelect = ({
   const handleOnDrillOut = () => {
     if (searchQuery.type === "drillIn") {
       drillDirection.current = "out";
-      currentParentId && parentIdMap.current.delete(currentParentId);
+      if (currentParentId) parentIdMap.current.delete(currentParentId);
 
       const newParentIds = searchQuery.parentIds.slice(0, -1);
       onSearchQueryChange({
@@ -192,7 +192,6 @@ export const DrilldownSelect = ({
   // transitionend events between statically nested menus. Since we load data async and
   // render a single flat MenuList, there are no nested menus to transition between.
   // We manually focus the first item using PF's own selector from allowTabFirstItem().
-  // biome-ignore lint/correctness/useExhaustiveDependencies: options triggers focus after new data renders
   React.useEffect(() => {
     if (!drillDirection.current || isLoading || !menuRef.current) {
       return;

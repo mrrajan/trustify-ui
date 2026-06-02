@@ -16,7 +16,11 @@ import {
 import type { Group } from "@app/client";
 import { ConfirmDialog } from "@app/components/ConfirmDialog.tsx";
 import { LoadingWrapper } from "@app/components/LoadingWrapper";
-import { NotificationsContext } from "@app/components/NotificationsContext.tsx";
+import { NotificationsContext } from "@app/components/NotificationsContext";
+import {
+  readOnlyActionProps,
+  ReadOnlyContext,
+} from "@app/components/ReadOnlyContext";
 import { SimplePagination } from "@app/components/SimplePagination";
 import { TableCellError } from "@app/components/TableCellError";
 import { ConditionalTableBody } from "@app/components/TableControls";
@@ -35,7 +39,6 @@ export const SbomGroupsTable: React.FC = () => {
   const {
     isFetching,
     fetchError,
-    totalItemCount,
     tableControls,
     setGroupCreateUpdateModalState,
   } = React.useContext(SbomGroupsContext);
@@ -79,7 +82,7 @@ export const SbomGroupsTable: React.FC = () => {
         <ConditionalTableBody
           isLoading={isFetching}
           isError={!!fetchError}
-          isNoData={totalItemCount === 0}
+          isNoData={currentPageItems.length === 0}
           numRenderedColumns={numRenderedColumns}
         >
           <Tbody>
@@ -152,15 +155,19 @@ const SbomGroupRow: React.FC<{
     isExpanded || hasBeenExpanded.current,
   );
 
+  const { isReadOnly } = React.useContext(ReadOnlyContext);
+
   const actions: IAction[] = [
     {
       title: "Edit",
       onClick: () => onEdit(node),
+      ...readOnlyActionProps(isReadOnly),
     },
     {
       title: "Delete",
       onClick: () => onDelete(node),
-      isDisabled: !!node.number_of_groups,
+      isDisabled: !isReadOnly && !!node.number_of_groups,
+      ...readOnlyActionProps(isReadOnly),
     },
   ];
 

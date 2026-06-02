@@ -12,6 +12,7 @@ import { LazyRouteElement } from "@app/components/LazyRouteElement";
 import App from "./App";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 
+/* eslint-disable react-refresh/only-export-components */
 const Home = lazy(() => import("./pages/home"));
 
 // Advisory
@@ -43,7 +44,9 @@ const SBOMGroupDetails = lazy(() => import("./pages/sbom-group-details"));
 const Search = lazy(() => import("./pages/search"));
 const ImporterList = lazy(() => import("./pages/importer-list"));
 const LicenseList = lazy(() => import("./pages/license-list"));
+const ModelList = lazy(() => import("./pages/model-list"));
 const NotFound = lazy(() => import("./pages/not-found"));
+/* eslint-enable react-refresh/only-export-components */
 
 export enum PathParam {
   ADVISORY_ID = "advisoryId",
@@ -69,6 +72,7 @@ export const Paths = {
   search: "/search",
   importers: "/importers",
   licenses: "/licenses",
+  models: "/models",
   sbomGroups: "/sbom-groups",
   sbomGroupDetails: `/sbom-groups/:${PathParam.SBOM_GROUP_ID}`,
 } as const;
@@ -148,6 +152,12 @@ export const AppRoutes = createBrowserRouter([
             identifier="license-list"
             component={<LicenseList />}
           />
+        ),
+      },
+      {
+        path: Paths.models,
+        element: (
+          <LazyRouteElement identifier="model-list" component={<ModelList />} />
         ),
       },
       {
@@ -248,7 +258,7 @@ export const AppRoutes = createBrowserRouter([
             PathParam.VULNERABILITY_ID,
           );
           const response = await queryClient.ensureQueryData(
-            vulnerabilityByIdQueryOptions(vulnerabilityId),
+            vulnerabilityByIdQueryOptions(vulnerabilityId, { scores: true }),
           );
           return {
             vulnerability: response.data,
