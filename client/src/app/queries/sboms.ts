@@ -62,20 +62,21 @@ export const useFetchSBOMs = (
   labels: Label[] = [],
   disableQuery = false,
 ) => {
-  const { q, ...rest } = requestParamsQuery(params);
   const labelQuery = labelRequestParamsQuery(labels);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: [SBOMsQueryKey, groupId, params, labelQuery],
-    queryFn: () =>
-      listSboms({
+    queryFn: () => {
+      const { q, ...rest } = requestParamsQuery(params);
+      return listSboms({
         client,
         query: {
           ...rest,
           group: groupId ? [groupId] : [],
           q: [q, labelQuery].filter((e) => e).join("&"),
         },
-      }),
+      });
+    },
     enabled: !disableQuery,
   });
   return {
@@ -92,11 +93,8 @@ export const useFetchSBOMs = (
 
 export const sbomByIdQueryOptions = (id: string | undefined) => ({
   queryKey: [SBOMsQueryKey, id] as const,
-  queryFn: () => {
-    return id === undefined
-      ? Promise.resolve(undefined)
-      : getSbom({ client, path: { id: id } });
-  },
+  queryFn: () => getSbom({ client, path: { id: id! } }),
+  enabled: !!id,
 });
 
 export const useFetchSBOMById = (

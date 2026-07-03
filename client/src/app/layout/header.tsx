@@ -1,6 +1,6 @@
 import type React from "react";
 import { useReducer, useState } from "react";
-import { useAuth } from "react-oidc-context";
+import { type AuthContextProps, useAuth } from "react-oidc-context";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -37,18 +37,33 @@ import ExternalLinkAltIcon from "@patternfly/react-icons/dist/esm/icons/external
 import { ThemeSelector } from "tsd-ui";
 
 import { isAuthRequired } from "@app/Constants";
-import useBranding from "@app/hooks/useBranding";
+import getBranding from "@app/hooks/useBranding";
 import { oidcSignoutArgs } from "@app/oidc";
 
 import imgAvatar from "../images/avatar.svg";
 import { AboutApp } from "./about";
 
 export const HeaderApp: React.FC = () => {
+  return isAuthRequired ? <HeaderWithAuth /> : <HeaderWithoutAuth />;
+};
+
+const HeaderWithAuth: React.FC = () => {
+  const auth = useAuth();
+  return <HeaderAppInner auth={auth} />;
+};
+
+const HeaderWithoutAuth: React.FC = () => {
+  return <HeaderAppInner auth={null} />;
+};
+
+interface IHeaderAppInnerProps {
+  auth: AuthContextProps | null;
+}
+
+const HeaderAppInner: React.FC<IHeaderAppInnerProps> = ({ auth }) => {
   const {
     masthead: { leftBrand, leftTitle, rightBrand, supportUrl },
-  } = useBranding();
-
-  const auth = (isAuthRequired && useAuth()) || undefined;
+  } = getBranding();
 
   const navigate = useNavigate();
 

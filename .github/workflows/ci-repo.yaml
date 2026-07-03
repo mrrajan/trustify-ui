@@ -16,8 +16,10 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Use Node.js
         uses: actions/setup-node@v6
         with:
@@ -44,10 +46,13 @@ jobs:
       - name: Crate Clippy
         working-directory: ./crate
         run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Crate Test
+        working-directory: ./crate
+        run: cargo test
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          use_oidc: true
           flags: unit
           slug: ${{ github.repository_owner }}/trustify-ui
           directory: client/coverage

@@ -60,12 +60,12 @@ export const useFetchAdvisories = (
   labels: Label[] = [],
   disableQuery = false,
 ) => {
-  const { q, ...rest } = requestParamsQuery(params);
   const labelQuery = labelRequestParamsQuery(labels);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: [AdvisoriesQueryKey, params, labelQuery],
     queryFn: () => {
+      const { q, ...rest } = requestParamsQuery(params);
       return listAdvisories({
         client,
         query: {
@@ -127,15 +127,23 @@ export const useDeleteAdvisoryMutation = (
   });
 };
 
-export const useFetchAdvisorySourceById = (id: string) => {
+export const useFetchAdvisorySourceById = (id: string, enabled = true) => {
   const { data, isLoading, error } = useQuery({
     queryKey: [AdvisoriesQueryKey, id, "source"],
-    queryFn: () => downloadAdvisory({ client, path: { key: id } }),
-    enabled: !!id,
+    queryFn: async () => {
+      const response = await downloadAdvisory({
+        client,
+        path: { key: id },
+        responseType: "text",
+        headers: { Accept: "text/plain" },
+      });
+      return String(response.data);
+    },
+    enabled: !!id && enabled,
   });
 
   return {
-    source: data,
+    source: data ?? null,
     isFetching: isLoading,
     fetchError: error as AxiosError | null,
   };

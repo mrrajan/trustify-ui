@@ -63,6 +63,11 @@ function useAllEntities(filterText: string, disableSearch: boolean) {
     page: { pageNumber: 1, itemsPerPage: 5 },
   };
 
+  const sbomParams: HubRequestParams = {
+    filters: [{ field: "name", operator: "~", value: filterText }],
+    page: { pageNumber: 1, itemsPerPage: 5 },
+  };
+
   const {
     isFetching: isFetchingAdvisories,
     result: { data: advisories },
@@ -76,7 +81,7 @@ function useAllEntities(filterText: string, disableSearch: boolean) {
   const {
     isFetching: isFetchingSBOMs,
     result: { data: sboms },
-  } = useFetchSBOMs(null, { ...params }, [], disableSearch);
+  } = useFetchSBOMs(null, { ...sbomParams }, [], disableSearch);
 
   const {
     isFetching: isFetchingVulnerabilities,
@@ -166,14 +171,29 @@ export const SearchMenu: React.FC<ISearchMenu> = ({ onChangeSearch }) => {
     React.useContext(SbomSearchContext);
 
   // Search value
+  // Stable string primitive — the filterState object is recreated every render
+  // (no useMemo in the useUrlParams → useFilterState → context chain), but the
+  // extracted string only changes when the URL filter param actually changes.
+  const appliedSearchValue =
+    sbomTableControls.filterState.filterValues["name"]?.[0] ?? "";
+
   const [searchValue, setSearchValue] = React.useState("");
   const [isSearchValueDirty, setIsSearchValueDirty] = React.useState(false);
+  const submittedSearchValueRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
-    const searchValueFromTableControls =
-      sbomTableControls.filterState.filterValues[FILTER_TEXT_CATEGORY_KEY]?.[0];
-    setSearchValue(searchValueFromTableControls ?? "");
-  }, [sbomTableControls.filterState]);
+    if (isSearchValueDirty) return;
+
+    if (submittedSearchValueRef.current !== null) {
+      if (appliedSearchValue === submittedSearchValueRef.current) {
+        submittedSearchValueRef.current = null;
+        setSearchValue(appliedSearchValue);
+      }
+      return;
+    }
+
+    setSearchValue(appliedSearchValue);
+  }, [appliedSearchValue, isSearchValueDirty]);
 
   // Debounce Search value
   const [debouncedSearchValue, setDebouncedSearchValue] = useDebounceValue(
@@ -185,10 +205,13 @@ export const SearchMenu: React.FC<ISearchMenu> = ({ onChangeSearch }) => {
     setDebouncedSearchValue(searchValue);
   }, [setDebouncedSearchValue, searchValue]);
 
+  const disableAutocomplete =
+    !isSearchValueDirty || debouncedSearchValue.trim() === "";
+
   // Fetch all entities
   const { isFetching, list: entityList } = useAllEntities(
     debouncedSearchValue,
-    !isSearchValueDirty,
+    disableAutocomplete,
   );
 
   const [isAutocompleteOpen, setIsAutocompleteOpen] =
@@ -217,9 +240,16 @@ export const SearchMenu: React.FC<ISearchMenu> = ({ onChangeSearch }) => {
 
   const onClearSearchValue = () => {
     setSearchValue("");
+    setIsSearchValueDirty(false);
+    setIsAutocompleteOpen(false);
+    submittedSearchValueRef.current = "";
+    onChangeSearch("");
   };
 
   const onSubmitInput = () => {
+    setIsSearchValueDirty(false);
+    setIsAutocompleteOpen(false);
+    submittedSearchValueRef.current = searchValue;
     onChangeSearch(searchValue);
   };
 
