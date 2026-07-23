@@ -44,7 +44,7 @@ export interface SearchTabsProps {
     >;
     packageFilterPanelProps: IFilterPanelProps<
       PackageTableData,
-      "" | "type" | "arch" | "license"
+      "name" | "type" | "arch" | "license"
     >;
     sbomFilterPanelProps: IFilterPanelProps<
       SbomSummary,
@@ -105,10 +105,10 @@ export const SearchTabs: React.FC<SearchTabsProps> = ({
     tabKeys: ["sboms", "packages", "vulnerabilities", "advisories"],
   });
 
-  const sbomPopoverRef = React.useRef<HTMLElement>();
-  const packagePopoverRef = React.useRef<HTMLElement>();
-  const vulnerabilityPopoverRef = React.useRef<HTMLElement>();
-  const advisoryPopoverRef = React.useRef<HTMLElement>();
+  const sbomPopoverRef = React.useRef<HTMLElement>(null);
+  const packagePopoverRef = React.useRef<HTMLElement>(null);
+  const vulnerabilityPopoverRef = React.useRef<HTMLElement>(null);
+  const advisoryPopoverRef = React.useRef<HTMLElement>(null);
 
   return (
     <Split hasGutter>
@@ -122,7 +122,7 @@ export const SearchTabs: React.FC<SearchTabsProps> = ({
               />
             ) : isTabActive("packages") ? (
               <FilterPanel
-                omitFilterCategoryKeys={[""]}
+                omitFilterCategoryKeys={["name"]}
                 {...packageFilterPanelProps}
               />
             ) : isTabActive("vulnerabilities") ? (

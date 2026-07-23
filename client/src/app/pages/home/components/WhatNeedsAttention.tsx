@@ -21,7 +21,7 @@ import {
   extendedSeverityFromSeverity,
   type HubRequestParams,
 } from "@app/api/models";
-import { LoadingWrapper } from "@app/components/LoadingWrapper";
+import { LoadingWrapper } from "@tsd-ui/core";
 import { SeverityShieldAndText } from "@app/components/SeverityShieldAndText";
 import { VulnerabilityDescription } from "@app/components/VulnerabilityDescription";
 import { useFetchVulnerabilities } from "@app/queries/vulnerabilities";
@@ -39,6 +39,7 @@ const getLastSevenDaysRequestParams = (): HubRequestParams => {
   return {
     page: { pageNumber: 1, itemsPerPage: MAX_ATTENTION_ITEMS },
     sort: { field: "base_score", direction: "desc" },
+    total: false,
     filters: [
       {
         field: "published",
@@ -113,7 +114,7 @@ export const VulnerabilityAttentionSection: React.FC = () => {
                                   default: "justifyContentSpaceBetween",
                                 }}
                                 spaceItems={{ default: "spaceItemsSm" }}
-                                wrap={{ default: "wrap" }}
+                                flexWrap={{ default: "wrap" }}
                               >
                                 <FlexItem>
                                   <SeverityShieldAndText

@@ -15,7 +15,7 @@ import {
   type IngestResult,
   type Labels,
   type SbomHead,
-  bulkUpdateSbomGroupAssignments,
+  patchSbomGroupAssignments,
   deleteSbom,
   downloadSbom,
   getSbom,
@@ -61,11 +61,12 @@ export const useFetchSBOMs = (
   params: HubRequestParams = {},
   labels: Label[] = [],
   disableQuery = false,
+  advisories = false,
 ) => {
   const labelQuery = labelRequestParamsQuery(labels);
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: [SBOMsQueryKey, groupId, params, labelQuery],
+    queryKey: [SBOMsQueryKey, groupId, params, labelQuery, advisories],
     queryFn: () => {
       const { q, ...rest } = requestParamsQuery(params);
       return listSboms({
@@ -74,6 +75,7 @@ export const useFetchSBOMs = (
           ...rest,
           group: groupId ? [groupId] : [],
           q: [q, labelQuery].filter((e) => e).join("&"),
+          advisories,
         },
       });
     },
@@ -305,11 +307,11 @@ export const useAddSBOMsToGroupsMutation = (
   return useMutation({
     mutationFn: async (payload: { group: Group; sboms: SbomHead[] }) => {
       const { sboms, group } = payload;
-      const response = await bulkUpdateSbomGroupAssignments({
+      const response = await patchSbomGroupAssignments({
         client,
         body: {
-          group_ids: [group.id],
           sbom_ids: sboms.map((e) => e.id),
+          add: [group.id],
         },
       });
       return response.data;
@@ -317,6 +319,33 @@ export const useAddSBOMsToGroupsMutation = (
     onSuccess: async (_response, payload) => {
       await queryClient.invalidateQueries({
         queryKey: [SBOMsQueryKey, payload.group.id],
+      });
+      onSuccess(payload);
+    },
+    onError: onError,
+  });
+};
+
+export const useRemoveSBOMFromGroupMutation = (
+  onSuccess: (payload: { groupId: string; sbom: SbomHead }) => void,
+  onError: (err: AxiosError) => void,
+) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: { groupId: string; sbom: SbomHead }) => {
+      const { sbom, groupId } = payload;
+      const response = await patchSbomGroupAssignments({
+        client,
+        body: {
+          sbom_ids: [sbom.id],
+          remove: [groupId],
+        },
+      });
+      return response.data;
+    },
+    onSuccess: async (_response, payload) => {
+      await queryClient.invalidateQueries({
+        queryKey: [SBOMsQueryKey, payload.groupId],
       });
       onSuccess(payload);
     },
