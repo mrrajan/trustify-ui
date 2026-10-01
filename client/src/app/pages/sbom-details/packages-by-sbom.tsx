@@ -4,9 +4,11 @@ import { generatePath, Link } from "react-router-dom";
 import {
   List,
   ListItem,
+  Skeleton,
   Toolbar,
   ToolbarContent,
   ToolbarItem,
+  Tooltip,
 } from "@patternfly/react-core";
 import spacing from "@patternfly/react-styles/css/utilities/Spacing/spacing";
 import {
@@ -34,6 +36,8 @@ import {
   useTableControlState,
 } from "@app/hooks/table-controls";
 import { useFetchPackagesBySbomId } from "@app/queries/packages";
+import { OutlinedQuestionCircleIcon } from "@patternfly/react-icons";
+import { useFetchRecommendations } from "@app/queries/recommendations";
 import { useFetchSbomsLicenseIds } from "@app/queries/sboms";
 import { Paths } from "@app/Routes";
 import { decodePurl } from "@app/utils/utils";
@@ -41,6 +45,7 @@ import { decodePurl } from "@app/utils/utils";
 import { PackageVulnerabilities } from "../package-list/components/PackageVulnerabilities";
 import { WithPackage } from "@app/components/WithPackage";
 import { VulnerabilityGallery } from "@app/components/VulnerabilityGallery";
+import { useMemo } from "react";
 
 const renderLicenseWithMappings = (
   license: string,
@@ -65,6 +70,7 @@ export const PackagesBySbom: React.FC<PackagesProps> = ({ sbomId }) => {
       version: "Version",
       vulnerabilities: "Vulnerabilities",
       licenses: "Licenses",
+      remediation: "Remediations",
       purls: "PURLs",
       cpes: "CPEs",
     },
@@ -135,6 +141,16 @@ export const PackagesBySbom: React.FC<PackagesProps> = ({ sbomId }) => {
     expansionDerivedState: { isCellExpanded },
   } = tableControls;
 
+  const purls = useMemo(
+    () =>
+      currentPageItems
+        .map((item) => item.purl[0]?.purl)
+        .filter((p): p is string => Boolean(p)),
+    [currentPageItems],
+  );
+
+  const { recommendationsMap } = useFetchRecommendations(purls);
+
   return (
     <>
       <Toolbar {...toolbarProps} aria-label="Package toolbar">
@@ -158,6 +174,12 @@ export const PackagesBySbom: React.FC<PackagesProps> = ({ sbomId }) => {
               <Th {...getThProps({ columnKey: "version" })} />
               <Th {...getThProps({ columnKey: "vulnerabilities" })} />
               <Th {...getThProps({ columnKey: "licenses" })} />
+              <Th {...getThProps({ columnKey: "remediation" })}>
+                Remediations{" "}
+                <Tooltip content="Number of CVEs with a fix available for this package. Open the package to see remediations per CVE in the Vulnerabilities tab.">
+                  <OutlinedQuestionCircleIcon />
+                </Tooltip>
+              </Th>
               <Th {...getThProps({ columnKey: "purls" })} />
               <Th {...getThProps({ columnKey: "cpes" })} />
             </TableHeaderContentWithControls>
@@ -170,6 +192,10 @@ export const PackagesBySbom: React.FC<PackagesProps> = ({ sbomId }) => {
           numRenderedColumns={numRenderedColumns}
         >
           {currentPageItems?.map((item, rowIndex) => {
+            const currentPurl = item.purl[0]?.purl;
+            const rowRecommendations =
+              recommendationsMap.get(currentPurl ?? "") ?? [];
+
             return (
               <Tbody key={item.id} isExpanded={isCellExpanded(item)}>
                 <Tr {...getTrProps({ item })}>
@@ -182,7 +208,7 @@ export const PackagesBySbom: React.FC<PackagesProps> = ({ sbomId }) => {
                       {[item.name, item.group].filter(Boolean).join("/")}
                     </Td>
                     <Td
-                      width={15}
+                      width={10}
                       modifier="truncate"
                       {...getTdProps({ columnKey: "version" })}
                     >
@@ -217,7 +243,7 @@ export const PackagesBySbom: React.FC<PackagesProps> = ({ sbomId }) => {
                       )}
                     </Td>
                     <Td
-                      width={20}
+                      width={15}
                       modifier="breakWord"
                       {...getTdProps({
                         columnKey: "licenses",
@@ -227,6 +253,63 @@ export const PackagesBySbom: React.FC<PackagesProps> = ({ sbomId }) => {
                       })}
                     >
                       {item.licenses.length} Licenses
+                    </Td>
+                    <Td
+                      width={15}
+                      {...getTdProps({ columnKey: "remediation" })}
+                    >
+                      {item.purl[0] ? (
+                        <WithPackage packageId={item.purl[0].uuid}>
+                          {(pkg, isFetching) => {
+                            if (isFetching) {
+                              return (
+                                <Skeleton screenreaderText="Loading remediations" />
+                              );
+                            }
+                            const affectedStatuses = (
+                              pkg?.advisories ?? []
+                            ).flatMap((a) =>
+                              a.status.filter((s) => s.status === "affected"),
+                            );
+                            const affectedCveIds = pkg
+                              ? new Set(
+                                  affectedStatuses.map(
+                                    (s) => s.vulnerability.identifier,
+                                  ),
+                                )
+                              : null;
+                            const hasCveAgnosticBackport =
+                              rowRecommendations.some(
+                                (rec) => rec.vulnerabilities.length === 0,
+                              );
+                            const cveIdsWithRemediation = new Set<string>();
+                            if (hasCveAgnosticBackport && affectedCveIds) {
+                              for (const id of affectedCveIds)
+                                cveIdsWithRemediation.add(id);
+                            }
+                            for (const rec of rowRecommendations) {
+                              for (const vuln of rec.vulnerabilities) {
+                                if (
+                                  !affectedCveIds ||
+                                  affectedCveIds.has(vuln.id)
+                                )
+                                  cveIdsWithRemediation.add(vuln.id);
+                              }
+                            }
+                            for (const s of affectedStatuses) {
+                              if (s.fixed_versions.length > 0) {
+                                cveIdsWithRemediation.add(
+                                  s.vulnerability.identifier,
+                                );
+                              }
+                            }
+                            const count = cveIdsWithRemediation.size;
+                            return `${count} ${count === 1 ? "Remediation" : "Remediations"}`;
+                          }}
+                        </WithPackage>
+                      ) : (
+                        "0 Remediations"
+                      )}
                     </Td>
                     <Td
                       width={20}
@@ -251,7 +334,7 @@ export const PackagesBySbom: React.FC<PackagesProps> = ({ sbomId }) => {
                       )}
                     </Td>
                     <Td
-                      width={20}
+                      width={15}
                       modifier="breakWord"
                       {...getTdProps({
                         columnKey: "cpes",

@@ -5,7 +5,7 @@ info:
   license:
     name: Apache License, Version 2.0
     identifier: Apache-2.0
-  version: 0.5.0-rc.1
+  version: 0.6.0-rc.1
 paths:
   /.well-known/trustify:
     get:
@@ -48,6 +48,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RecommendResponse'
+        '503':
+          description: Endpoint disabled — TRUSTD_RECOMMEND_PATTERNS not configured
       deprecated: true
   /api/v2/sbom:
     get:
@@ -325,11 +327,13 @@ paths:
           - osv
           - csaf
           - cve
+          - nvd
           - spdx
           - cyclonedx
           - clearlydefinedcuration
           - clearlydefined
           - cwecatalog
+          - cisakev
           - advisory
           - sbom
           - unknown
@@ -1008,6 +1012,167 @@ paths:
           description: The user did not provide valid authentication credentials
         '403':
           description: The user lacks the required permission
+  /api/v3/crypto/algorithm:
+    get:
+      tags:
+      - crypto
+      operationId: listCryptoAlgorithms
+      parameters:
+      - name: q
+        in: query
+        description: |
+          EBNF grammar for the _q_ parameter:
+          ```text
+              q = ( values | filter ) { '&' q }
+              values = value { '|', values }
+              filter = field, operator, values
+              operator = "=" | "!=" | "~" | "!~" | ">=" | ">" | "<=" | "<"
+              value = (* any text but escape special characters with '\' *)
+              field = (* must match an entity attribute name *)
+          ```
+          Any values in a _q_ will result in a case-insensitive "full
+          text search", effectively producing an OR clause of LIKE
+          clauses for every string-ish field in the resource being
+          queried.
+
+          Examples:
+          - `foo` - any field containing 'foo'
+          - `foo|bar` - any field containing either 'foo' OR 'bar'
+          - `foo&bar` - some field contains 'foo' AND some field contains 'bar'
+
+          A _filter_ may also be used to constrain the results. The
+          filter's field name must correspond to one of the resource's
+          attributes. If it doesn't, an error will be returned
+          containing a list of the valid fields for that resource.
+
+          An ASCII value of `NUL`, percent-encoded as `%00`, may be used
+          to find resources on which a particular field isn't set. For
+          example, `name=%00` and `name!=%00` yield the WHERE clauses,
+          'NAME IS NULL' and 'NAME IS NOT NULL', respectively.
+
+          Examples:
+          - `name=foo` - entity's _name_ matches 'foo' exactly
+          - `name~foo` - entity's _name_ contains 'foo', case-insensitive
+          - `name~foo|bar` - entity's _name_ contains either 'foo' OR 'bar', case-insensitive
+          - `name=` - entity's _name_ is the empty string, ''
+          - `name=%00` - entity's _name_ isn't set
+          - `published>3 days ago` - date values can be "human time"
+
+          Multiple full text searches and/or filters should be
+          '&'-delimited -- they are logically AND'd together.
+
+          - `red hat|fedora&labels:type=cve|osv&published>last wednesday 17:00`
+
+          Fields corresponding to JSON objects in the database may use a
+          ':' to delimit the column name and the object key,
+          e.g. `purl:qualifiers:type=pom`
+
+          Any operator or special character, e.g. '|', '&', within a
+          value should be escaped by prefixing it with a backslash.
+        required: false
+        schema:
+          type: string
+      - name: sort
+        in: query
+        description: |
+          EBNF grammar for the _sort_ parameter:
+          ```text
+              sort = field [ ':', order ] { ',' sort }
+              order = ( "asc" | "desc" )
+              field = (* must match the name of entity's attributes *)
+          ```
+          The optional _order_ should be one of "asc" or "desc". If
+          omitted, the order defaults to "asc".
+
+          Each _field_ name must correspond to one of the columns of the
+          table holding the entities being queried. Those corresponding
+          to JSON objects in the database may use a ':' to delimit the
+          column name and the object key,
+          e.g. `purl:qualifiers:type:desc`
+        required: false
+        schema:
+          type: string
+      - name: offset
+        in: query
+        description: |-
+          The first item to return, skipping all that come before it.
+
+          NOTE: The order of items is defined by the API being called.
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: limit
+        in: query
+        description: |-
+          The maximum number of entries to return.
+
+          Zero means: return no items (the total count is still computed if requested).
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: total
+        in: query
+        description: Whether to compute and return the total count of matching items.
+        required: false
+        schema:
+          type: boolean
+      - name: asset_type
+        in: query
+        description: Filter by crypto asset type
+        required: false
+        schema:
+          oneOf:
+          - type: 'null'
+          - type: string
+            description: |-
+              Possible types of the cryptographic assets within a CBOM
+              https://cyclonedx.org/docs/1.6/json/#components_items_cryptoProperties_assetType
+            enum:
+            - algorithm
+            - certificate
+            - protocol
+            - related-crypto-material
+      responses:
+        '200':
+          description: Matching crypto algorithms
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResults_CryptoAlgorithmSummary'
+  /api/v3/crypto/policy/evaluate:
+    post:
+      tags:
+      - crypto
+      operationId: evaluateCryptoPolicy
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PolicyEvaluationRequest'
+        required: true
+      responses:
+        '200':
+          description: Policy evaluation results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyEvaluationResponse'
+  /api/v3/crypto/summary:
+    get:
+      tags:
+      - crypto
+      operationId: getCryptoSummary
+      responses:
+        '200':
+          description: Crypto KPI summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CryptoSummary'
   /api/v3/dataset:
     post:
       tags:
@@ -1036,6 +1201,288 @@ paths:
           description: Uploaded the dataset
         '400':
           description: The file could not be parsed as an dataset
+  /api/v3/exploit:
+    get:
+      tags:
+      - exploit
+      summary: List exploit entries
+      description: |-
+        Source-specific fields can be filtered through the JSON syntax of the query
+        language, e.g. `q=metadata:known_ransomware_campaign_use=Known`.
+      operationId: listExploits
+      parameters:
+      - name: q
+        in: query
+        description: |
+          EBNF grammar for the _q_ parameter:
+          ```text
+              q = ( values | filter ) { '&' q }
+              values = value { '|', values }
+              filter = field, operator, values
+              operator = "=" | "!=" | "~" | "!~" | ">=" | ">" | "<=" | "<"
+              value = (* any text but escape special characters with '\' *)
+              field = (* must match an entity attribute name *)
+          ```
+          Any values in a _q_ will result in a case-insensitive "full
+          text search", effectively producing an OR clause of LIKE
+          clauses for every string-ish field in the resource being
+          queried.
+
+          Examples:
+          - `foo` - any field containing 'foo'
+          - `foo|bar` - any field containing either 'foo' OR 'bar'
+          - `foo&bar` - some field contains 'foo' AND some field contains 'bar'
+
+          A _filter_ may also be used to constrain the results. The
+          filter's field name must correspond to one of the resource's
+          attributes. If it doesn't, an error will be returned
+          containing a list of the valid fields for that resource.
+
+          An ASCII value of `NUL`, percent-encoded as `%00`, may be used
+          to find resources on which a particular field isn't set. For
+          example, `name=%00` and `name!=%00` yield the WHERE clauses,
+          'NAME IS NULL' and 'NAME IS NOT NULL', respectively.
+
+          Examples:
+          - `name=foo` - entity's _name_ matches 'foo' exactly
+          - `name~foo` - entity's _name_ contains 'foo', case-insensitive
+          - `name~foo|bar` - entity's _name_ contains either 'foo' OR 'bar', case-insensitive
+          - `name=` - entity's _name_ is the empty string, ''
+          - `name=%00` - entity's _name_ isn't set
+          - `published>3 days ago` - date values can be "human time"
+
+          Multiple full text searches and/or filters should be
+          '&'-delimited -- they are logically AND'd together.
+
+          - `red hat|fedora&labels:type=cve|osv&published>last wednesday 17:00`
+
+          Fields corresponding to JSON objects in the database may use a
+          ':' to delimit the column name and the object key,
+          e.g. `purl:qualifiers:type=pom`
+
+          Any operator or special character, e.g. '|', '&', within a
+          value should be escaped by prefixing it with a backslash.
+        required: false
+        schema:
+          type: string
+      - name: sort
+        in: query
+        description: |
+          EBNF grammar for the _sort_ parameter:
+          ```text
+              sort = field [ ':', order ] { ',' sort }
+              order = ( "asc" | "desc" )
+              field = (* must match the name of entity's attributes *)
+          ```
+          The optional _order_ should be one of "asc" or "desc". If
+          omitted, the order defaults to "asc".
+
+          Each _field_ name must correspond to one of the columns of the
+          table holding the entities being queried. Those corresponding
+          to JSON objects in the database may use a ':' to delimit the
+          column name and the object key,
+          e.g. `purl:qualifiers:type:desc`
+        required: false
+        schema:
+          type: string
+      - name: offset
+        in: query
+        description: |-
+          The first item to return, skipping all that come before it.
+
+          NOTE: The order of items is defined by the API being called.
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: limit
+        in: query
+        description: |-
+          The maximum number of entries to return.
+
+          Zero means: return no items (the total count is still computed if requested).
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: total
+        in: query
+        description: Whether to compute and return the total count of matching items.
+        required: false
+        schema:
+          type: boolean
+      responses:
+        '200':
+          description: Matching exploit entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResults_Exploit'
+  /api/v3/exploit-intelligence/analyze:
+    post:
+      tags:
+      - exploit-intelligence
+      summary: Trigger an Exploit Intelligence analysis for a CVE against an SBOM.
+      description: |-
+        Creates a job record that the background worker will pick up and
+        process. Returns immediately after persisting the job.
+      operationId: analyzeExploitIntelligence
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalyzeRequest'
+        required: true
+      responses:
+        '200':
+          description: Active analysis job already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyzeResponse'
+        '201':
+          description: Analysis job created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyzeResponse'
+        '404':
+          description: SBOM not found
+        '503':
+          description: Exploit Intelligence service not configured
+  /api/v3/exploit-intelligence/jobs:
+    get:
+      tags:
+      - exploit-intelligence
+      summary: List Exploit Intelligence analysis jobs.
+      operationId: listExploitIntelligenceJobs
+      parameters:
+      - name: q
+        in: query
+        description: |
+          Query for advisories defined using the following EBNF grammar (ISO/IEC 14977):
+          ```text
+          (* Query Grammar - EBNF Compliant *)
+          query = ( values | filter ) , { "&" , query } ;
+          values = value , { "|" , value } ;
+          filter = field , operator , values ;
+          operator = "=" | "!=" | "~" | "!~" | ">=" | ">" | "<=" | "<" ;
+          field = ("id" | "sbom_id" | "vulnerability_id" | "status" | "created" | "updated")
+          value = { value_char } ;
+          value_char = escaped_char | normal_char ;
+          escaped_char = "\" , special_char ;
+          normal_char = ? any character except '&', '|', '=', '!', '~', '>', '<', '\' ? ;
+          special_char = "&" | "|" | "=" | "!" | "~" | ">" | "<" | "\" ;
+          ```
+          Examples:
+          - Simple filter: title=example
+          - Multiple values filter: title=foo|bar|baz
+          - Complex filter: modified>2024-01-01
+          - Combined query: title=foo&average_severity=high
+          - Escaped characters: title=foo\\&bar
+        required: false
+        schema:
+          type: string
+      - name: sort
+        in: query
+        description: |-
+          EBNF grammar for the _sort_ parameter:
+          ```text
+              sort = field [ ':', order ] { ',' sort }
+              order = ( "asc" | "desc" )
+              field = ("id" | "sbom_id" | "vulnerability_id" | "status" | "created" | "updated")
+          ```
+          The optional _order_ should be one of "asc" or "desc". If
+          omitted, the order defaults to "asc".
+
+          Each _field_ name must correspond to one of the columns of the
+          table holding the entities being queried. Those corresponding
+          to JSON objects in the database may use a ':' to delimit the
+          column name and the object key,
+          e.g. `purl:qualifiers:type:desc`
+        required: false
+        schema:
+          type: string
+      - name: offset
+        in: query
+        description: |-
+          The first item to return, skipping all that come before it.
+
+          NOTE: The order of items is defined by the API being called.
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: limit
+        in: query
+        description: |-
+          The maximum number of entries to return.
+
+          Zero means: return no items (the total count is still computed if requested).
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: total
+        in: query
+        description: Whether to compute and return the total count of matching items.
+        required: false
+        schema:
+          type: boolean
+      responses:
+        '200':
+          description: List of analysis jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResults_ExploitIntelligenceJobSummary'
+  /api/v3/exploit-intelligence/jobs/{id}:
+    get:
+      tags:
+      - exploit-intelligence
+      summary: Get details of a specific Exploit Intelligence analysis job.
+      operationId: getExploitIntelligenceJob
+      parameters:
+      - name: id
+        in: path
+        description: Job identifier
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Job details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExploitIntelligenceJobDetails'
+        '404':
+          description: Job not found
+  /api/v3/exploit/{id}:
+    get:
+      tags:
+      - exploit
+      summary: Retrieve an exploit entry
+      operationId: getExploit
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: The exploit entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Exploit'
+        '404':
+          description: The exploit entry could not be found
   /api/v3/group/sbom:
     get:
       tags:
@@ -2546,6 +2993,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RecommendResponse'
+        '503':
+          description: Endpoint disabled — TRUSTD_RECOMMEND_PATTERNS not configured
+  /api/v3/purl/recommend/report:
+    post:
+      tags:
+      - purl
+      summary: Generate an aggregated vendor recommendation report for a set of SBOMs.
+      operationId: recommendReport
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecommendReportRequest'
+        required: true
+      responses:
+        '200':
+          description: Aggregated recommendation report for the requested SBOMs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecommendReportResponse'
+        '413':
+          description: Total package count across requested SBOMs exceeds the configured limit
   /api/v3/purl/{key}:
     get:
       tags:
@@ -2731,11 +3201,13 @@ paths:
           - osv
           - csaf
           - cve
+          - nvd
           - spdx
           - cyclonedx
           - clearlydefinedcuration
           - clearlydefined
           - cwecatalog
+          - cisakev
           - advisory
           - sbom
           - unknown
@@ -3172,6 +3644,14 @@ paths:
         required: true
         schema:
           $ref: '#/components/schemas/Id'
+      - name: include_resolved
+        in: query
+        description: |-
+          When true, include resolved statuses (fixed, not_affected)
+          alongside affected.
+        required: false
+        schema:
+          type: boolean
       responses:
         '200':
           description: Matching SBOM
@@ -3206,6 +3686,144 @@ paths:
                   $ref: '#/components/schemas/LicenseRefMapping'
         '404':
           description: The SBOM could not be found
+  /api/v3/sbom/{id}/crypto:
+    get:
+      tags:
+      - crypto
+      operationId: listSbomCrypto
+      parameters:
+      - name: id
+        in: path
+        description: ID of the SBOM to get crypto assets for
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: q
+        in: query
+        description: |
+          EBNF grammar for the _q_ parameter:
+          ```text
+              q = ( values | filter ) { '&' q }
+              values = value { '|', values }
+              filter = field, operator, values
+              operator = "=" | "!=" | "~" | "!~" | ">=" | ">" | "<=" | "<"
+              value = (* any text but escape special characters with '\' *)
+              field = (* must match an entity attribute name *)
+          ```
+          Any values in a _q_ will result in a case-insensitive "full
+          text search", effectively producing an OR clause of LIKE
+          clauses for every string-ish field in the resource being
+          queried.
+
+          Examples:
+          - `foo` - any field containing 'foo'
+          - `foo|bar` - any field containing either 'foo' OR 'bar'
+          - `foo&bar` - some field contains 'foo' AND some field contains 'bar'
+
+          A _filter_ may also be used to constrain the results. The
+          filter's field name must correspond to one of the resource's
+          attributes. If it doesn't, an error will be returned
+          containing a list of the valid fields for that resource.
+
+          An ASCII value of `NUL`, percent-encoded as `%00`, may be used
+          to find resources on which a particular field isn't set. For
+          example, `name=%00` and `name!=%00` yield the WHERE clauses,
+          'NAME IS NULL' and 'NAME IS NOT NULL', respectively.
+
+          Examples:
+          - `name=foo` - entity's _name_ matches 'foo' exactly
+          - `name~foo` - entity's _name_ contains 'foo', case-insensitive
+          - `name~foo|bar` - entity's _name_ contains either 'foo' OR 'bar', case-insensitive
+          - `name=` - entity's _name_ is the empty string, ''
+          - `name=%00` - entity's _name_ isn't set
+          - `published>3 days ago` - date values can be "human time"
+
+          Multiple full text searches and/or filters should be
+          '&'-delimited -- they are logically AND'd together.
+
+          - `red hat|fedora&labels:type=cve|osv&published>last wednesday 17:00`
+
+          Fields corresponding to JSON objects in the database may use a
+          ':' to delimit the column name and the object key,
+          e.g. `purl:qualifiers:type=pom`
+
+          Any operator or special character, e.g. '|', '&', within a
+          value should be escaped by prefixing it with a backslash.
+        required: false
+        schema:
+          type: string
+      - name: sort
+        in: query
+        description: |
+          EBNF grammar for the _sort_ parameter:
+          ```text
+              sort = field [ ':', order ] { ',' sort }
+              order = ( "asc" | "desc" )
+              field = (* must match the name of entity's attributes *)
+          ```
+          The optional _order_ should be one of "asc" or "desc". If
+          omitted, the order defaults to "asc".
+
+          Each _field_ name must correspond to one of the columns of the
+          table holding the entities being queried. Those corresponding
+          to JSON objects in the database may use a ':' to delimit the
+          column name and the object key,
+          e.g. `purl:qualifiers:type:desc`
+        required: false
+        schema:
+          type: string
+      - name: offset
+        in: query
+        description: |-
+          The first item to return, skipping all that come before it.
+
+          NOTE: The order of items is defined by the API being called.
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: limit
+        in: query
+        description: |-
+          The maximum number of entries to return.
+
+          Zero means: return no items (the total count is still computed if requested).
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: total
+        in: query
+        description: Whether to compute and return the total count of matching items.
+        required: false
+        schema:
+          type: boolean
+      - name: asset_type
+        in: query
+        description: Filter by crypto asset type
+        required: false
+        schema:
+          oneOf:
+          - type: 'null'
+          - type: string
+            description: |-
+              Possible types of the cryptographic assets within a CBOM
+              https://cyclonedx.org/docs/1.6/json/#components_items_cryptoProperties_assetType
+            enum:
+            - algorithm
+            - certificate
+            - protocol
+            - related-crypto-material
+      responses:
+        '200':
+          description: Crypto assets for the SBOM
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResults_CryptoAlgorithmSummary'
   /api/v3/sbom/{id}/label:
     put:
       tags:
@@ -3843,7 +4461,7 @@ paths:
           values = value , { "|" , value } ;
           filter = field , operator , values ;
           operator = "=" | "!=" | "~" | "!~" | ">=" | ">" | "<=" | "<" ;
-          field = ("id" | "title" | "reserved" | "published" | "modified" | "withdrawn" | "cwes" | "base_score" | "base_severity")
+          field = ("id" | "title" | "reserved" | "published" | "modified" | "withdrawn" | "cwes" | "base_score" | "base_severity" | "has_fix_versions")
           value = { value_char } ;
           value_char = escaped_char | normal_char ;
           escaped_char = "\" , special_char ;
@@ -3866,7 +4484,7 @@ paths:
           ```text
               sort = field [ ':', order ] { ',' sort }
               order = ( "asc" | "desc" )
-              field = ("id" | "title" | "reserved" | "published" | "modified" | "withdrawn" | "cwes" | "base_score" | "base_severity")
+              field = ("id" | "title" | "reserved" | "published" | "modified" | "withdrawn" | "cwes" | "base_score" | "base_severity" | "has_fix_versions")
           ```
           The optional _order_ should be one of "asc" or "desc". If
           omitted, the order defaults to "asc".
@@ -4196,6 +4814,31 @@ components:
       allOf:
       - $ref: '#/components/schemas/AdvisoryVulnerabilityHead'
       description: Summary of information from this advisory regarding a single specific vulnerability.
+    AlgorithmPolicyResult:
+      type: object
+      required:
+      - sbom_id
+      - node_id
+      - name
+      - oid
+      - properties
+      - verdict
+      properties:
+        name:
+          type: string
+        node_id:
+          type: string
+        oid:
+          type:
+          - string
+          - 'null'
+        properties:
+          type: object
+        sbom_id:
+          type: string
+          format: uuid
+        verdict:
+          $ref: '#/components/schemas/PolicyVerdict'
     AnalysisAdvisory:
       allOf:
       - $ref: '#/components/schemas/AdvisoryHead'
@@ -4252,6 +4895,11 @@ components:
       required:
       - purls
       properties:
+        include_resolved:
+          type: boolean
+          description: |-
+            When true, include resolved statuses (fixed, not_affected)
+            alongside affected.
         purls:
           type: array
           items:
@@ -4343,6 +4991,91 @@ components:
         cache:
           $ref: '#/components/schemas/CacheStatusDetails'
           description: Details about the cache
+    AnalyzeRequest:
+      type: object
+      description: Request body for triggering an Exploit Intelligence analysis.
+      required:
+      - sbom_id
+      - vulnerability_id
+      properties:
+        sbom_id:
+          type: string
+          format: uuid
+          description: The SBOM identifier to analyze.
+        vulnerability_id:
+          type: string
+          description: The vulnerability identifier (e.g., "CVE-2024-9680").
+    AnalyzeResponse:
+      type: object
+      description: Response returned when an analysis job is successfully created.
+      required:
+      - job_id
+      - status
+      properties:
+        job_id:
+          type: string
+          format: uuid
+          description: The unique job identifier.
+        status:
+          $ref: '#/components/schemas/ExploitIntelligenceJobStatus'
+          description: Current lifecycle status of the job.
+    AuthConfig:
+      type: object
+      description: |-
+        Authentication configuration for HTTP-based importers.
+
+        Wraps an [`AuthMethod`] whose credentials are resolved from
+        a [`CredentialSource`] at import time — not at configuration time.
+      required:
+      - method
+      properties:
+        method:
+          $ref: '#/components/schemas/AuthMethod'
+    AuthMethod:
+      oneOf:
+      - type: object
+        description: HTTP Basic authentication.
+        required:
+        - username
+        - password
+        - type
+        properties:
+          password:
+            $ref: '#/components/schemas/CredentialSource'
+          type:
+            type: string
+            enum:
+            - basic
+          username:
+            $ref: '#/components/schemas/CredentialSource'
+      - type: object
+        description: Bearer token in the Authorization header.
+        required:
+        - token
+        - type
+        properties:
+          token:
+            $ref: '#/components/schemas/CredentialSource'
+          type:
+            type: string
+            enum:
+            - bearer
+      - type: object
+        description: Arbitrary header/value pair (e.g. API key headers).
+        required:
+        - header
+        - value
+        - type
+        properties:
+          header:
+            type: string
+          type:
+            type: string
+            enum:
+            - apiKey
+          value:
+            $ref: '#/components/schemas/CredentialSource'
+      description: HTTP authentication method applied on each import request.
     BasePurlDetails:
       allOf:
       - $ref: '#/components/schemas/BasePurlHead'
@@ -4563,6 +5296,54 @@ components:
         period:
           type: string
           description: The period the importer should be run.
+    ComponentResult:
+      type: object
+      description: Per-component analysis result within an analysis job.
+      required:
+      - id
+      - component_ref
+      - status
+      - excluded
+      - created
+      - updated
+      properties:
+        advisory_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+          description: FK to advisory — set when a VEX document is ingested from the result.
+        component_ref:
+          type: string
+          description: Identifier of the component (purl or container image reference).
+        created:
+          type: string
+          description: Timestamp when the component record was created.
+        excluded:
+          type: boolean
+          description: |-
+            Whether this component was excluded by the EI service (e.g.,
+            unsupported ecosystem) rather than genuinely failing.
+        finding:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ExploitIntelligenceFinding'
+            description: Analysis result from Exploit Intelligence, if completed.
+        id:
+          type: string
+          format: uuid
+          description: The unique component record identifier.
+        report_url:
+          type:
+          - string
+          - 'null'
+          description: Link to the EI human-readable justification report for this component.
+        status:
+          $ref: '#/components/schemas/ExploitIntelligenceJobStatus'
+          description: Current lifecycle status of this component's analysis.
+        updated:
+          type: string
+          description: Timestamp when the component record was last updated.
     Cpe:
       type: string
       format: uri
@@ -4574,6 +5355,134 @@ components:
         id:
           type: string
           description: The ID of the newly created group
+    CredentialSource:
+      oneOf:
+      - type: object
+        description: |-
+          Literal value stored in the database.
+
+          **Security:** the credential is stored in plaintext in the database.
+          Prefer [`CredentialSource::Env`] or [`CredentialSource::File`] for production use.
+        required:
+        - value
+        - type
+        properties:
+          type:
+            type: string
+            enum:
+            - inline
+          value:
+            type: string
+            description: |-
+              Literal value stored in the database.
+
+              **Security:** the credential is stored in plaintext in the database.
+              Prefer [`CredentialSource::Env`] or [`CredentialSource::File`] for production use.
+      - type: object
+        description: Name of an environment variable read at import time.
+        required:
+        - value
+        - type
+        properties:
+          type:
+            type: string
+            enum:
+            - env
+          value:
+            type: string
+            description: Name of an environment variable read at import time.
+      - type: object
+        description: Filesystem path to a file whose content is read at import time.
+        required:
+        - value
+        - type
+        properties:
+          type:
+            type: string
+            enum:
+            - file
+          value:
+            type: string
+            description: Filesystem path to a file whose content is read at import time.
+      description: |-
+        How a credential value is sourced at import time.
+
+        Inline stores the value directly (dev only). Env and File store
+        only a reference — the value is resolved from the environment or
+        filesystem at each import run, enabling K8s Secret rotation.
+    CryptoAlgorithmSummary:
+      type: object
+      description: Summary of a cryptographic asset found in SBOMs.
+      required:
+      - sbom_id
+      - node_id
+      - name
+      - asset_type
+      - oid
+      - primitive
+      - properties
+      - policy_status
+      - packages_count
+      - sboms_count
+      properties:
+        asset_type:
+          $ref: '#/components/schemas/CryptoAssetType'
+        name:
+          type: string
+        node_id:
+          type: string
+        oid:
+          type:
+          - string
+          - 'null'
+        packages_count:
+          type: integer
+          format: int64
+        policy_status:
+          $ref: '#/components/schemas/PolicyVerdict'
+        primitive:
+          type:
+          - string
+          - 'null'
+        properties:
+          type: object
+        sbom_id:
+          type: string
+          format: uuid
+        sboms_count:
+          type: integer
+          format: int64
+    CryptoAssetType:
+      type: string
+      description: |-
+        Possible types of the cryptographic assets within a CBOM
+        https://cyclonedx.org/docs/1.6/json/#components_items_cryptoProperties_assetType
+      enum:
+      - algorithm
+      - certificate
+      - protocol
+      - related-crypto-material
+    CryptoSummary:
+      type: object
+      description: Aggregate KPI metrics for cryptographic assets across all SBOMs.
+      required:
+      - total_algorithms
+      - pqc_compliant
+      - classical_share_pct
+      - sboms_meeting_pqc
+      properties:
+        classical_share_pct:
+          type: number
+          format: double
+        pqc_compliant:
+          type: integer
+          format: int64
+        sboms_meeting_pqc:
+          type: integer
+          format: int64
+        total_algorithms:
+          type: integer
+          format: int64
     CsafImporter:
       allOf:
       - $ref: '#/components/schemas/CommonImporter'
@@ -4639,6 +5548,248 @@ components:
         message:
           type: string
           description: A human-readable error message
+    Exploit:
+      type: object
+      description: |-
+        An assertion by some source that a vulnerability is exploited in the wild,
+        or that working exploit code for it exists.
+
+        The named fields are those every source can be expected to carry; everything
+        specific to one source is in `metadata`. For CISA KEV, that is
+        `vendor_project`, `product`, `vulnerability_name`, `short_description`,
+        `required_action`, `known_ransomware_campaign_use`, `notes` and `cwes`.
+      required:
+      - id
+      - source
+      - cve_id
+      - date_reported
+      - remediation_due_date
+      - metadata
+      properties:
+        cve_id:
+          type: string
+          description: The vulnerability this entry refers to.
+        date_reported:
+          type:
+          - string
+          - 'null'
+          format: date
+          description: The date the source first reported the exploitation.
+        id:
+          type: string
+          description: Opaque identifier of this entry, stable across resyncs of the source.
+        metadata:
+          type: object
+          description: Structured data specific to the reporting source.
+        remediation_due_date:
+          type:
+          - string
+          - 'null'
+          format: date
+          description: The date by which the source mandates remediation, if it mandates one.
+        source:
+          type: string
+          description: The source that reported the exploitation (e.g. "cisa-kev").
+    ExploitIntelligenceFinding:
+      type: string
+      description: |-
+        Analysis finding from the Exploit Intelligence service.
+
+        Represents the outcome of a vulnerability analysis for a given component/CVE pair.
+      enum:
+      - vulnerable
+      - not_vulnerable
+      - uncertain
+    ExploitIntelligenceJobDetails:
+      type: object
+      description: Detailed view of an Exploit Intelligence analysis job.
+      required:
+      - id
+      - sbom_id
+      - vulnerability_id
+      - status
+      - components
+      - created
+      - updated
+      properties:
+        completed_components:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Number of completed components (computed at query time, not stored).
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComponentResult'
+          description: Per-component analysis results (populated for multi-component jobs).
+        created:
+          type: string
+          description: Timestamp when the job was created.
+        excluded_components:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Number of components excluded by the EI service (computed at query time, not stored).
+        failed_components:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Number of genuinely failed components (computed at query time, not stored).
+        finding:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ExploitIntelligenceFinding'
+            description: Analysis result computed from component findings.
+        id:
+          type: string
+          format: uuid
+          description: The unique job identifier.
+        not_vulnerable_components:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Number of completed components with finding=not_vulnerable (computed at query time).
+        product_id:
+          type:
+          - string
+          - 'null'
+          description: EI product ID for multi-component SPDX flow.
+        report_url:
+          type:
+          - string
+          - 'null'
+          description: Link to the EI human-readable justification report.
+        sbom_id:
+          type: string
+          format: uuid
+          description: FK to the SBOM being analysed.
+        status:
+          $ref: '#/components/schemas/ExploitIntelligenceJobStatus'
+          description: Current lifecycle status of the job.
+        total_components:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Total components in the product.
+        uncertain_components:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Number of completed components with finding=uncertain (computed at query time).
+        updated:
+          type: string
+          description: Timestamp when the job was last updated.
+        vulnerability_id:
+          type: string
+          description: CVE identifier.
+        vulnerable_components:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Number of completed components with finding=vulnerable (computed at query time).
+    ExploitIntelligenceJobStatus:
+      type: string
+      description: Lifecycle status of an Exploit Intelligence analysis job.
+      enum:
+      - pending
+      - running
+      - completed
+      - failed
+    ExploitIntelligenceJobSummary:
+      type: object
+      description: Summary of an Exploit Intelligence analysis job.
+      required:
+      - id
+      - sbom_id
+      - vulnerability_id
+      - status
+      - created
+      - updated
+      properties:
+        completed_components:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Number of completed components (computed at query time, not stored).
+        created:
+          type: string
+          description: Timestamp when the job was created.
+        excluded_components:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Number of components excluded by the EI service (computed at query time, not stored).
+        failed_components:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Number of genuinely failed components (computed at query time, not stored).
+        finding:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ExploitIntelligenceFinding'
+            description: Analysis result from Exploit Intelligence.
+        id:
+          type: string
+          format: uuid
+          description: The unique job identifier.
+        not_vulnerable_components:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Number of completed components with finding=not_vulnerable (computed at query time).
+        product_id:
+          type:
+          - string
+          - 'null'
+          description: EI product ID for multi-component SPDX flow.
+        report_url:
+          type:
+          - string
+          - 'null'
+          description: Link to the EI human-readable justification report.
+        sbom_id:
+          type: string
+          format: uuid
+          description: FK to the SBOM being analysed.
+        status:
+          $ref: '#/components/schemas/ExploitIntelligenceJobStatus'
+          description: Current lifecycle status of the job.
+        total_components:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Total components in the product.
+        uncertain_components:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Number of completed components with finding=uncertain (computed at query time).
+        updated:
+          type: string
+          description: Timestamp when the job was last updated.
+        vulnerability_id:
+          type: string
+          description: CVE identifier.
+        vulnerable_components:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Number of completed components with finding=vulnerable (computed at query time).
     ExternalReferenceQuery:
       type: object
       properties:
@@ -4686,17 +5837,42 @@ components:
           items:
             type: string
           description: warnings while parsing
+    Finding:
+      type: object
+      description: A single validation finding produced by a validator.
+      required:
+      - severity
+      - message
+      properties:
+        message:
+          type: string
+          description: Human-readable description of the finding.
+        path:
+          type:
+          - string
+          - 'null'
+          description: Location within the document (e.g. a JSONPath), when available.
+        rule:
+          type:
+          - string
+          - 'null'
+          description: Identifier of the rule that produced the finding, when available.
+        severity:
+          $ref: '#/components/schemas/Severity'
+          description: The severity of this finding.
     Format:
       type: string
       enum:
       - osv
       - csaf
       - cve
+      - nvd
       - spdx
       - cyclonedx
       - clearlydefinedcuration
       - clearlydefined
       - cwecatalog
+      - cisakev
       - advisory
       - sbom
       - unknown
@@ -4762,6 +5938,57 @@ components:
           - string
           - 'null'
           description: The ID of the group's parent.
+    HttpDiscovery:
+      oneOf:
+      - type: object
+        required:
+        - type
+        properties:
+          type:
+            type: string
+            enum:
+            - pulp
+      description: Pluggable file-discovery strategy for the HTTP importer.
+    HttpImporter:
+      allOf:
+      - $ref: '#/components/schemas/CommonImporter'
+      - type: object
+        required:
+        - source
+        - discovery
+        properties:
+          auth:
+            oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/AuthConfig'
+              description: Optional authentication configuration for accessing the source.
+          discovery:
+            $ref: '#/components/schemas/HttpDiscovery'
+            description: File-discovery strategy used to enumerate files in the source.
+          fetchRetries:
+            type:
+            - integer
+            - 'null'
+            description: |-
+              Number of fetch retries for individual file downloads.
+              Defaults to the fetcher's built-in retry count when absent.
+            minimum: 0
+          onlyPatterns:
+            type: array
+            items:
+              type: string
+            description: |-
+              Optional list of regex patterns restricting which discovered files are
+              imported. An empty list imports all discovered files.
+          source:
+            type: string
+            description: Base URL of the HTTP repository to import documents from.
+      description: |-
+        Configuration for the HTTP-based importer.
+
+        Fetches documents from an HTTP repository, using a pluggable
+        discovery strategy to enumerate files and an optional credential
+        for authenticated sources.
     Id:
       type: string
       description: |-
@@ -4808,6 +6035,12 @@ components:
             $ref: '#/components/schemas/CveImporter'
       - type: object
         required:
+        - nvd
+        properties:
+          nvd:
+            $ref: '#/components/schemas/NvdImporter'
+      - type: object
+        required:
         - clearlyDefined
         properties:
           clearlyDefined:
@@ -4826,10 +6059,22 @@ components:
             $ref: '#/components/schemas/CweImporter'
       - type: object
         required:
+        - kev
+        properties:
+          kev:
+            $ref: '#/components/schemas/KevImporter'
+      - type: object
+        required:
         - quay
         properties:
           quay:
             $ref: '#/components/schemas/QuayImporter'
+      - type: object
+        required:
+        - http
+        properties:
+          http:
+            $ref: '#/components/schemas/HttpImporter'
     ImporterData:
       type: object
       required:
@@ -4906,14 +6151,45 @@ components:
           - string
           - 'null'
           description: The ID declared by the document
+        duplicate:
+          type: boolean
+          description: True when the document already existed; no new data was ingested.
         id:
           $ref: '#/components/schemas/Id'
           description: The internal ID of the document
+        validation:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationReport'
+          description: |-
+            Structured reports from semantic validators run during ingestion.
+
+            See ADR 00020. Empty when no validators are configured or none apply
+            to the document's format.
         warnings:
           type: array
           items:
             type: string
           description: Warnings that occurred during the import process
+    KevImporter:
+      allOf:
+      - $ref: '#/components/schemas/CommonImporter'
+        description: Common importer options.
+      - type: object
+        properties:
+          catalog:
+            type:
+            - string
+            - 'null'
+            description: |-
+              Catalog source identifier under which the imported entries are stored
+              (and replaced on each run). Defaults to "cisa-kev".
+          source:
+            type: string
+            description: URL of the catalog document to import.
+      description: |-
+        Importer configuration for known-exploited-vulnerability catalogs
+        (e.g. CISA KEV).
     Labels:
       type: object
       additionalProperties:
@@ -5016,6 +6292,37 @@ components:
             items:
               type: string
             description: Warnings when processing this node.
+    NvdImporter:
+      allOf:
+      - $ref: '#/components/schemas/CommonImporter'
+      - type: object
+        properties:
+          source:
+            type: string
+            description: |-
+              The base URL of the GitHub repository publishing NVD data as per-year
+              release assets (`CVE-<year>.json.xz` + `.meta`), in the NVD-API JSON
+              schema. The latest release is always used.
+          startYear:
+            type:
+            - integer
+            - 'null'
+            format: int32
+            description: |-
+              The first feed year to import when `years` is empty; all years from
+              here through the current year are imported. Defaults to 1999, the
+              first year with NVD data.
+            minimum: 0
+          years:
+            type: array
+            items:
+              type: integer
+              format: int32
+              minimum: 0
+            description: |-
+              An explicit set of feed years to import. When non-empty, exactly these
+              years are imported and `start_year` is ignored.
+            uniqueItems: true
     OrganizationDetails:
       allOf:
       - $ref: '#/components/schemas/OrganizationHead'
@@ -5129,6 +6436,217 @@ components:
           items:
             allOf:
             - $ref: '#/components/schemas/BasePurlHead'
+        total:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+    PaginatedResults_CryptoAlgorithmSummary:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            description: Summary of a cryptographic asset found in SBOMs.
+            required:
+            - sbom_id
+            - node_id
+            - name
+            - asset_type
+            - oid
+            - primitive
+            - properties
+            - policy_status
+            - packages_count
+            - sboms_count
+            properties:
+              asset_type:
+                $ref: '#/components/schemas/CryptoAssetType'
+              name:
+                type: string
+              node_id:
+                type: string
+              oid:
+                type:
+                - string
+                - 'null'
+              packages_count:
+                type: integer
+                format: int64
+              policy_status:
+                $ref: '#/components/schemas/PolicyVerdict'
+              primitive:
+                type:
+                - string
+                - 'null'
+              properties:
+                type: object
+              sbom_id:
+                type: string
+                format: uuid
+              sboms_count:
+                type: integer
+                format: int64
+        total:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+    PaginatedResults_Exploit:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            description: |-
+              An assertion by some source that a vulnerability is exploited in the wild,
+              or that working exploit code for it exists.
+
+              The named fields are those every source can be expected to carry; everything
+              specific to one source is in `metadata`. For CISA KEV, that is
+              `vendor_project`, `product`, `vulnerability_name`, `short_description`,
+              `required_action`, `known_ransomware_campaign_use`, `notes` and `cwes`.
+            required:
+            - id
+            - source
+            - cve_id
+            - date_reported
+            - remediation_due_date
+            - metadata
+            properties:
+              cve_id:
+                type: string
+                description: The vulnerability this entry refers to.
+              date_reported:
+                type:
+                - string
+                - 'null'
+                format: date
+                description: The date the source first reported the exploitation.
+              id:
+                type: string
+                description: Opaque identifier of this entry, stable across resyncs of the source.
+              metadata:
+                type: object
+                description: Structured data specific to the reporting source.
+              remediation_due_date:
+                type:
+                - string
+                - 'null'
+                format: date
+                description: The date by which the source mandates remediation, if it mandates one.
+              source:
+                type: string
+                description: The source that reported the exploitation (e.g. "cisa-kev").
+        total:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+    PaginatedResults_ExploitIntelligenceJobSummary:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            description: Summary of an Exploit Intelligence analysis job.
+            required:
+            - id
+            - sbom_id
+            - vulnerability_id
+            - status
+            - created
+            - updated
+            properties:
+              completed_components:
+                type:
+                - integer
+                - 'null'
+                format: int32
+                description: Number of completed components (computed at query time, not stored).
+              created:
+                type: string
+                description: Timestamp when the job was created.
+              excluded_components:
+                type:
+                - integer
+                - 'null'
+                format: int32
+                description: Number of components excluded by the EI service (computed at query time, not stored).
+              failed_components:
+                type:
+                - integer
+                - 'null'
+                format: int32
+                description: Number of genuinely failed components (computed at query time, not stored).
+              finding:
+                oneOf:
+                - type: 'null'
+                - $ref: '#/components/schemas/ExploitIntelligenceFinding'
+                  description: Analysis result from Exploit Intelligence.
+              id:
+                type: string
+                format: uuid
+                description: The unique job identifier.
+              not_vulnerable_components:
+                type:
+                - integer
+                - 'null'
+                format: int32
+                description: Number of completed components with finding=not_vulnerable (computed at query time).
+              product_id:
+                type:
+                - string
+                - 'null'
+                description: EI product ID for multi-component SPDX flow.
+              report_url:
+                type:
+                - string
+                - 'null'
+                description: Link to the EI human-readable justification report.
+              sbom_id:
+                type: string
+                format: uuid
+                description: FK to the SBOM being analysed.
+              status:
+                $ref: '#/components/schemas/ExploitIntelligenceJobStatus'
+                description: Current lifecycle status of the job.
+              total_components:
+                type:
+                - integer
+                - 'null'
+                format: int32
+                description: Total components in the product.
+              uncertain_components:
+                type:
+                - integer
+                - 'null'
+                format: int32
+                description: Number of completed components with finding=uncertain (computed at query time).
+              updated:
+                type: string
+                description: Timestamp when the job was last updated.
+              vulnerability_id:
+                type: string
+                description: CVE identifier.
+              vulnerable_components:
+                type:
+                - integer
+                - 'null'
+                format: int32
+                description: Number of completed components with finding=vulnerable (computed at query time).
         total:
           type:
           - integer
@@ -5781,6 +7299,52 @@ components:
           items:
             type: string
           description: The IDs of the SBOMs to update.
+    PolicyEvaluationRequest:
+      type: object
+      properties:
+        sbom_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+    PolicyEvaluationResponse:
+      type: object
+      required:
+      - summary
+      - results
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlgorithmPolicyResult'
+        summary:
+          $ref: '#/components/schemas/PolicySummaryResult'
+    PolicySummaryResult:
+      type: object
+      required:
+      - total
+      - compliant
+      - warning
+      - non_compliant
+      properties:
+        compliant:
+          type: integer
+          minimum: 0
+        non_compliant:
+          type: integer
+          minimum: 0
+        total:
+          type: integer
+          minimum: 0
+        warning:
+          type: integer
+          minimum: 0
+    PolicyVerdict:
+      type: string
+      enum:
+      - compliant
+      - warning
+      - non_compliant
     ProductDetails:
       allOf:
       - $ref: '#/components/schemas/ProductHead'
@@ -5968,6 +7532,7 @@ components:
       - scores
       - status
       - context
+      - fixed_versions
       properties:
         advisory:
           $ref: '#/components/schemas/AdvisoryHead'
@@ -5975,6 +7540,10 @@ components:
           oneOf:
           - type: 'null'
           - $ref: '#/components/schemas/StatusContext'
+        fixed_versions:
+          type: array
+          items:
+            type: string
         scores:
           type: array
           items:
@@ -6013,11 +7582,11 @@ components:
       - $ref: '#/components/schemas/CommonImporter'
       - type: object
         properties:
-          apiToken:
-            type:
-            - string
-            - 'null'
-            description: The API token authorizing access to the quay registry
+          auth:
+            oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/AuthConfig'
+              description: Authentication configuration for accessing the Quay registry.
           concurrency:
             type:
             - integer
@@ -6052,6 +7621,109 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/VulnerabilityStatus'
+    RecommendReportImpactSummary:
+      type: object
+      description: High-level impact summary for a recommendation report.
+      required:
+      - sboms_with_recommendations
+      - addressable_packages
+      properties:
+        addressable_packages:
+          type: integer
+          description: Count of distinct upstream packages that have a vendor recommendation.
+          minimum: 0
+        sboms_with_recommendations:
+          type: integer
+          description: Number of SBOMs containing at least one package with a vendor recommendation.
+          minimum: 0
+    RecommendReportPackage:
+      type: object
+      description: A deduplicated package entry in a recommendation report.
+      required:
+      - purl
+      - recommended_purl
+      - vulnerabilities
+      - found_in
+      properties:
+        advisory_id:
+          type:
+          - string
+          - 'null'
+          description: Advisory ID that provides provenance for the recommendation.
+        found_in:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: IDs of the SBOMs that contain this upstream package.
+        purl:
+          type: string
+          description: The upstream package PURL (type+namespace+name+version, no qualifiers).
+        recommended_purl:
+          type: string
+          description: The recommended vendor-rebuilt PURL.
+        vulnerabilities:
+          type: array
+          items:
+            type: string
+          description: CVE identifiers associated with this recommendation.
+    RecommendReportRequest:
+      type: object
+      description: Request body for the `POST /api/v3/purl/recommend/report` endpoint.
+      required:
+      - sbom_ids
+      properties:
+        sbom_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: SBOM IDs to include in the report.
+    RecommendReportResponse:
+      type: object
+      description: Aggregated recommendation report for a set of SBOMs.
+      required:
+      - impact_summary
+      - sboms
+      - packages
+      properties:
+        impact_summary:
+          $ref: '#/components/schemas/RecommendReportImpactSummary'
+          description: High-level impact summary.
+        packages:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecommendReportPackage'
+          description: Deduplicated list of packages with vendor recommendations.
+        sboms:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecommendReportSbom'
+          description: Per-SBOM breakdown.
+    RecommendReportSbom:
+      type: object
+      description: Per-SBOM summary in a recommendation report.
+      required:
+      - id
+      - name
+      - addressable_packages
+      - vulnerability_count
+      properties:
+        addressable_packages:
+          type: integer
+          description: Number of packages in this SBOM that have a vendor recommendation.
+          minimum: 0
+        id:
+          type: string
+          format: uuid
+          description: SBOM identifier.
+        name:
+          type: string
+          description: SBOM document name.
+        vulnerability_count:
+          type: integer
+          description: Number of distinct vulnerabilities across addressable packages in this SBOM.
+          minimum: 0
     RecommendRequest:
       type: object
       required:
@@ -6430,11 +8102,17 @@ components:
         - status
         - packages
         - scores
+        - fixed_versions
         properties:
           context:
             oneOf:
             - type: 'null'
             - $ref: '#/components/schemas/StatusContext'
+          fixed_versions:
+            type: array
+            items:
+              type: string
+            description: Versions that fix this vulnerability, extracted from "fixed" advisory entries
           packages:
             type: array
             items:
@@ -6599,6 +8277,30 @@ components:
         oneOf:
         - type: 'null'
         - type: string
+    ValidationOutcome:
+      type: string
+      description: Whether a validator considered the document acceptable.
+      enum:
+      - passed
+      - failed
+    ValidationReport:
+      type: object
+      description: A structured report produced by a single validator run.
+      required:
+      - validator
+      - outcome
+      properties:
+        findings:
+          type: array
+          items:
+            $ref: '#/components/schemas/Finding'
+          description: Findings produced by the validator.
+        outcome:
+          $ref: '#/components/schemas/ValidationOutcome'
+          description: The overall outcome, derived from the findings and the validator's threshold.
+        validator:
+          type: string
+          description: The [`Validator::name`] that produced this report.
     VersionRange:
       oneOf:
       - type: object
@@ -6785,12 +8487,20 @@ components:
       - type: object
         required:
         - advisories
+        - exploits
         properties:
           advisories:
             type: array
             items:
               $ref: '#/components/schemas/VulnerabilityAdvisorySummary'
             description: Advisories addressing this vulnerability, if any.
+          exploits:
+            type: array
+            items:
+              $ref: '#/components/schemas/Exploit'
+            description: |-
+              Reports that this vulnerability is exploited, or that working exploit
+              code for it exists (e.g. from the CISA KEV catalog), if any.
           scores:
             $ref: '#/components/schemas/RequestedField_Vec_Vec_ScoredVector'
             description: |-
